@@ -92,6 +92,7 @@ def test_only_one_crew_runs_at_a_time(fake_llm, monkeypatch):
     finally:
         server.crew_lock.release()
     assert "event: failed" in body and "busy" in body
+    assert not any(server.recent_runs.values())          # a "busy" refusal doesn't count
 
 
 def test_questions_must_be_a_sensible_length():

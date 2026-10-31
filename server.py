@@ -43,10 +43,12 @@ def over_limit(ip: str) -> bool:
     """True if this visitor already ran RUNS_PER_HOUR questions in the last hour."""
     now = time.time()
     recent_runs[ip] = [t for t in recent_runs[ip] if now - t < 3600]
-    if len(recent_runs[ip]) >= RUNS_PER_HOUR:
-        return True
-    recent_runs[ip].append(now)
-    return False
+    return len(recent_runs[ip]) >= RUNS_PER_HOUR
+
+
+def count_run(ip: str):
+    """Only questions that actually start a run count; a 'busy' refusal costs nothing."""
+    recent_runs[ip].append(time.time())
 
 
 def sse(event: str, data) -> str:
@@ -83,7 +85,9 @@ def load(slug: str) -> dict:
 @app.get("/api/config")
 def config():
     return {"model": MODEL, "fallback": FALLBACK_MODEL, "threshold": KEEP_THRESHOLD,
-            "max_rounds": MAX_ROUNDS}
+            "max_rounds": MAX_ROUNDS,
+            # Render sets RENDER_GIT_COMMIT, so we can check which version is live.
+            "version": os.getenv("RENDER_GIT_COMMIT", "local")[:7]}
 
 
 @app.get("/api/runs")
@@ -153,7 +157,8 @@ def run_crew(question: str, updates: queue.Queue):
 @app.get("/api/research")
 def research(request: Request, q: str = Query(min_length=3, max_length=300)):
     """Start the crew and stream its progress to the browser as it happens."""
-    limited = over_limit(client_ip(request))
+    ip = client_ip(request)
+    limited = over_limit(ip)
 
     def events():
         if limited:
@@ -163,6 +168,7 @@ def research(request: Request, q: str = Query(min_length=3, max_length=300)):
         if not crew_lock.acquire(blocking=False):
             yield sse("failed", {"message": "The crew is busy with another question. Try again in a minute."})
             return
+        count_run(ip)
         updates: queue.Queue = queue.Queue()
         # The worker thread owns the lock from here on and releases it when the run ends.
         threading.Thread(target=run_crew, args=(q, updates), daemon=True).start()
