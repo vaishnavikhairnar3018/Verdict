@@ -99,10 +99,11 @@ function showAgentSummaries() {
   const strong = run.objections.filter((o) => o.strength === "strong").length;
   const kept = run.verdicts.filter((v) => v.final_confidence >= t).length;
   const rounds = run.round > 1 ? ` in ${run.round} rounds` : "";
-  setAgent("researcher", "done", `Read ${run.sources.length} pages, wrote ${run.claims.length} claims${rounds}`);
-  setAgent("skeptic", "done", `Challenged ${run.objections.length} claims, ${strong} strong objection${strong === 1 ? "" : "s"}`);
-  setAgent("judge", "done", `${kept} of ${run.verdicts.length} claims passed`);
-  setAgent("writer", "done", kept ? "Answer written from verified claims" : "Not enough evidence to answer");
+  const took = (id) => (run.usage?.timings?.[id] != null ? ` · ${run.usage.timings[id]}s` : "");
+  setAgent("researcher", "done", `Read ${run.sources.length} pages, wrote ${run.claims.length} claims${rounds}${took("researcher")}`);
+  setAgent("skeptic", "done", `Challenged ${run.objections.length} claims, ${strong} strong objection${strong === 1 ? "" : "s"}${took("skeptic")}`);
+  setAgent("judge", "done", `${kept} of ${run.verdicts.length} claims passed${took("judge")}`);
+  setAgent("writer", "done", (kept ? "Answer written from verified claims" : "Not enough evidence to answer") + took("writer"));
 }
 
 function setAgent(id, state, text) {
@@ -141,6 +142,7 @@ function render() {
   const stats = [
     [verdicts.length, "Claims checked"], [kept.length, "Kept"], [verdicts.length - kept.length, "Dropped"],
     [run.sources.length, "Sources read"], [run.usage?.calls ?? "—", "LLM calls"],
+    [run.usage?.total_seconds != null ? `${run.usage.total_seconds}s` : "—", "Time taken"],
   ];
   $("#stats").innerHTML = stats.map(([n, label]) => `<div class="stat"><b>${n}</b><span>${label}</span></div>`).join("");
 
@@ -336,7 +338,17 @@ function startRun(question) {
   AGENTS.forEach((a) => setAgent(a.id, "waiting", "Waiting"));
   let researchRounds = 0;
 
+  // Live timer: once a second, show how long the working agent has been busy.
+  const startedAt = {};
+  const label = {};
+  const ticker = setInterval(() => {
+    for (const [agent, t0] of Object.entries(startedAt)) {
+      setAgent(agent, "active", `${label[agent]} ${Math.round((Date.now() - t0) / 1000)}s`);
+    }
+  }, 1000);
+
   const finish = () => {
+    clearInterval(ticker);
     stream.close();   // important: otherwise the browser auto-reconnects and re-runs the crew
     button.disabled = false;
     ["#answer-card", "#claims-card", "#sources-card"].forEach((s) => $(s).classList.remove("is-busy"));
@@ -347,11 +359,14 @@ function startRun(question) {
   stream.addEventListener("start", (e) => {
     const { agent } = JSON.parse(e.data);
     if (agent === "researcher") researchRounds += 1;
-    setAgent(agent, "active", researchRounds > 1 && agent === "researcher" ? `Round ${researchRounds}: working…` : "Working…");
+    label[agent] = researchRounds > 1 && agent === "researcher" ? `Round ${researchRounds}: working…` : "Working…";
+    startedAt[agent] = Date.now();
+    setAgent(agent, "active", `${label[agent]} 0s`);
   });
   stream.addEventListener("finish", (e) => {
-    const { agent, text } = JSON.parse(e.data);
-    setAgent(agent, "done", text);
+    const { agent, text, seconds } = JSON.parse(e.data);
+    delete startedAt[agent];
+    setAgent(agent, "done", seconds != null ? `${text} · ${seconds}s` : text);
   });
   stream.addEventListener("done", (e) => {
     run = JSON.parse(e.data);

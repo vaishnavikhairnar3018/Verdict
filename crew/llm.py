@@ -1,3 +1,4 @@
+import re
 import time
 from typing import TypeVar
 
@@ -25,6 +26,7 @@ usage = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "models": []}
 
 
 def reset_usage():
+    usage.clear()
     usage.update(calls=0, input_tokens=0, output_tokens=0, models=[])
 
 RETRY_WAITS = [5, 15, 30]          # seconds to wait before each retry
@@ -32,6 +34,18 @@ RETRYABLE = {429, 500, 503, 504}   # rate limited / server overloaded: waiting c
 COOLDOWN = 10 * 60                 # skip a model that keeps failing for 10 minutes
 
 broken_until: dict[str, float] = {}   # model -> time when we may try it again (circuit breaker)
+
+
+def read_429(error) -> tuple[bool, float | None]:
+    """Look inside a 'too many requests' error.
+
+    Returns (daily quota used up?, seconds Gemini asks us to wait, if it says).
+    A daily limit won't reset for hours, so waiting is pointless there.
+    """
+    text = str(error)
+    daily = "PerDay" in text
+    hint = re.search(r"retryDelay['\"]?\s*:\s*['\"](\d+(?:\.\d+)?)s", text)
+    return daily, float(hint.group(1)) if hint else None
 
 
 def generate(prompt: str, config: types.GenerateContentConfig):
@@ -50,9 +64,16 @@ def generate(prompt: str, config: types.GenerateContentConfig):
                 code = getattr(e, "code", "network")
                 if isinstance(e, errors.APIError) and code not in RETRYABLE:
                     raise                   # a real bug (bad key, bad request): don't hide it
+                if code == 429:
+                    daily, hint = read_429(e)
+                    if daily:
+                        print(f"    ({model} daily quota used up, switching now instead of waiting)")
+                        break
+                    if hint is not None and wait is not None:
+                        wait = min(hint + 1, 60)    # Gemini told us exactly how long to wait
                 if wait is None:
                     break                   # out of retries for this model
-                print(f"    ({model} busy: {code}, retrying in {wait}s)")
+                print(f"    ({model} busy: {code}, retrying in {wait:g}s)")
                 time.sleep(wait)
         broken_until[model] = time.time() + COOLDOWN
         print(f"    ({model} unavailable, skipping it for {COOLDOWN // 60} minutes)")

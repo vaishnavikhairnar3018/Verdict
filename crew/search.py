@@ -1,7 +1,11 @@
+from concurrent.futures import ThreadPoolExecutor
+
 from ddgs import DDGS
 
 from .config import RESULTS_PER_QUERY
 from .schemas import Source
+
+SEARCH_WORKERS = 4   # searches at once; more risks the search engine blocking us
 
 
 def _search_once(query: str) -> list[dict]:
@@ -30,14 +34,22 @@ def collect_sources(queries: list[str], known: list[Source]) -> tuple[list[Sourc
 
     Returns the new sources plus a map  query -> ids of sources it found.
     """
+    queries = list(dict.fromkeys(queries))     # drop duplicate queries, keep the order
+
+    # Searching is mostly waiting for the network, so run several searches at the same time.
+    # pool.map returns results in the same order as `queries`, so source ids stay identical
+    # to running them one by one.
+    with ThreadPoolExecutor(max_workers=SEARCH_WORKERS) as pool:
+        all_results = list(pool.map(web_search, queries))
+
     seen = {s.url for s in known}
     new: list[Source] = []
     by_query: dict[str, list[str]] = {}
 
-    for q in queries:
+    for q, results in zip(queries, all_results):
         print(f"    search: {q}")
         by_query[q] = []
-        for r in web_search(q):
+        for r in results:
             # Only real web links; anything else (javascript:, data:, empty) is dropped.
             if not r["url"].startswith(("http://", "https://")) or r["url"] in seen:
                 continue

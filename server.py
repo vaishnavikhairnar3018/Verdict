@@ -129,15 +129,23 @@ def research(request: Request, q: str = Query(min_length=3, max_length=300)):
         try:
             reset_usage()
             state = None
+            run_start = time.time()
+            started: dict[str, float] = {}
+            timings: dict[str, float] = defaultdict(float)   # seconds per agent (all rounds)
             # "tasks" fires when an agent starts and when it finishes; "values" is the full state.
             for mode, chunk in build_graph().stream(initial_state(q), stream_mode=["tasks", "values"]):
                 if mode == "values":
                     state = chunk
                 elif "result" not in chunk:
+                    started[chunk["name"]] = time.time()
                     yield sse("start", {"agent": chunk["name"]})
                 else:
-                    yield sse("finish", {"agent": chunk["name"],
+                    seconds = time.time() - started.get(chunk["name"], time.time())
+                    timings[chunk["name"]] += seconds
+                    yield sse("finish", {"agent": chunk["name"], "seconds": round(seconds),
                                          "text": summarize(chunk["name"], chunk["result"] or {})})
+            usage["timings"] = {name: round(s) for name, s in timings.items()}
+            usage["total_seconds"] = round(time.time() - run_start)
             report = save(state, usage)
             yield sse("done", load(report.stem))
         except Exception as e:
