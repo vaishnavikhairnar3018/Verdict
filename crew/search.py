@@ -1,18 +1,51 @@
+import os
 from concurrent.futures import ThreadPoolExecutor
 
 from ddgs import DDGS
+from tavily import TavilyClient
 
 from .config import RESULTS_PER_QUERY
 from .schemas import Source
 
 SEARCH_WORKERS = 4   # searches at once; more risks the search engine blocking us
+SNIPPET_CHARS = 700  # Tavily returns longer text than DuckDuckGo; cap it to keep prompts small
+
+_tavily_client = None
 
 
-def _search_once(query: str) -> list[dict]:
+def search_engine() -> str:
+    """Tavily if a key is set (reliable from cloud servers), otherwise DuckDuckGo (no key needed)."""
+    return "tavily" if os.getenv("TAVILY_API_KEY") else "duckduckgo"
+
+
+def _tavily(query: str) -> list[dict]:
+    global _tavily_client
+    if _tavily_client is None:
+        _tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
+    response = _tavily_client.search(query, max_results=RESULTS_PER_QUERY)
+    # Rename Tavily's fields to the ones DuckDuckGo uses, so the rest of the code doesn't care.
+    return [{"title": r.get("title", ""), "href": r.get("url", ""),
+             "body": (r.get("content") or "")[:SNIPPET_CHARS]}
+            for r in response.get("results", [])]
+
+
+def _duckduckgo(query: str) -> list[dict]:
     try:
         return DDGS().text(query, max_results=RESULTS_PER_QUERY)
     except Exception:
         return []   # ddgs raises an error when there are simply no results
+
+
+def _search_once(query: str) -> list[dict]:
+    if search_engine() == "tavily":
+        try:
+            results = _tavily(query)
+            if results:
+                return results
+        except Exception as e:
+            # Out of free credits, network problem...: one bad search must not stop the crew.
+            print(f"    (Tavily failed: {e}; using DuckDuckGo)")
+    return _duckduckgo(query)
 
 
 def web_search(query: str) -> list[dict]:

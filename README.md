@@ -49,6 +49,8 @@ Three different websites saying the same thing count for more than one blog. Two
 
 **Free APIs fail a lot.** I use Gemini's free tier, and it regularly answers with "503, high demand" or "429, out of quota". The LLM layer now retries with increasing waits, falls back to a second model, and remembers for 10 minutes when a model is down (a circuit breaker), so the crew doesn't waste a minute retrying a dead model on every call.
 
+**The live site found less than my laptop did.** After deploying, every answer on the server came back as "not enough evidence". DuckDuckGo returns far fewer results to cloud servers, so each claim had a single source and none could pass the confidence bar. Switching the main search to Tavily, with DuckDuckGo kept as a backup, fixed it.
+
 **Small guards matter.** The model sometimes cites sources that don't exist, skips a claim, or cites a claim that was rejected. Each of these is checked in plain Python after every LLM call, not left to the prompt.
 
 ## Screenshots
@@ -63,7 +65,7 @@ You can click any claim to see the Judge's reasoning, the Skeptic's objection an
 
 - **Python** with **LangGraph** to run the agents as a graph (it handles the research loop)
 - **Google Gemini** (free tier) with structured outputs, so every agent answers in a fixed JSON shape checked by **Pydantic**
-- **DuckDuckGo search** through `ddgs`, so no search API key is needed
+- **Tavily** for web search (free tier), with **DuckDuckGo** as a backup that needs no key
 - **FastAPI** backend that streams each agent's progress to the browser with Server-Sent Events
 - A plain **HTML, CSS and JavaScript** frontend, no framework; the chart is hand-drawn SVG
 - **pytest** with a fake LLM, so the whole pipeline can be tested offline and for free

@@ -16,6 +16,7 @@ from crew.config import FALLBACK_MODEL, KEEP_THRESHOLD, MAX_ROUNDS, MODEL
 from crew.graph import build_graph, initial_state
 from crew.llm import reset_usage, usage
 from crew.report import REPORTS, save
+from crew.search import search_engine
 
 app = FastAPI(title="Verdict")
 
@@ -85,7 +86,7 @@ def load(slug: str) -> dict:
 @app.get("/api/config")
 def config():
     return {"model": MODEL, "fallback": FALLBACK_MODEL, "threshold": KEEP_THRESHOLD,
-            "max_rounds": MAX_ROUNDS,
+            "max_rounds": MAX_ROUNDS, "search": search_engine(),
             # Render sets RENDER_GIT_COMMIT, so we can check which version is live.
             "version": os.getenv("RENDER_GIT_COMMIT", "local")[:7]}
 

@@ -12,6 +12,8 @@ services:
         value: 3.12.7
       - key: GEMINI_API_KEY      # secret: you type it in the Render dashboard, never in code
         sync: false
+      - key: TAVILY_API_KEY      # secret: web search that works well from cloud servers
+        sync: false
       - key: ALLOWED_ORIGINS     # your Vercel URL, e.g. https://verdict.vercel.app
         sync: false
       - key: RUNS_PER_HOUR
