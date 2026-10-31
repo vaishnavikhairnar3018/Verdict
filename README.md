@@ -91,6 +91,8 @@ python main.py "Does cracking your knuckles cause arthritis?"
 
 Each question takes about 6 to 10 LLM calls, so on the free tier it's worth waiting a minute between questions.
 
+The live version runs the backend on Render and the dashboard on Vercel. The steps are in [docs/DEPLOY.md](docs/DEPLOY.md).
+
 ## Tests
 
 ```bash

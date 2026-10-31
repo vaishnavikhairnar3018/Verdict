@@ -1,6 +1,7 @@
 // ============================== Helpers ==============================
 
 const $ = (selector) => document.querySelector(selector);
+const API = window.VERDICT_API || "";   // backend address, set in config.js
 
 // Web text (titles, snippets, claims) is untrusted: escape it before putting it in HTML,
 // or a page title like <img onerror=...> could run code in our dashboard (XSS).
@@ -135,7 +136,7 @@ function render() {
 
   const download = $("#download");
   download.hidden = !run.slug;
-  download.href = `/api/runs/${run.slug}/report.md`;
+  download.href = `${API}/api/runs/${run.slug}/report.md`;
 
   const stats = [
     [verdicts.length, "Claims checked"], [kept.length, "Kept"], [verdicts.length - kept.length, "Dropped"],
@@ -310,7 +311,7 @@ function openClaim(id) {
 // ============================== History ==============================
 
 async function renderHistory() {
-  const runs = await (await fetch("/api/runs")).json();
+  const runs = await (await fetch(`${API}/api/runs`)).json();
   $("#history").innerHTML = runs.map((r) => `
     <button class="run-card" data-slug="${esc(r.slug)}">
       <h3>${esc(r.question)}</h3>
@@ -320,7 +321,7 @@ async function renderHistory() {
 }
 
 async function openRun(slug) {
-  run = await (await fetch(`/api/runs/${encodeURIComponent(slug)}`)).json();
+  run = await (await fetch(`${API}/api/runs/${encodeURIComponent(slug)}`)).json();
   render();
   showAgentSummaries();
   showView("dashboard");
@@ -342,7 +343,7 @@ function startRun(question) {
   };
 
   // EventSource = the browser side of Server-Sent Events: the server pushes, we listen.
-  const stream = new EventSource(`/api/research?q=${encodeURIComponent(question)}`);
+  const stream = new EventSource(`${API}/api/research?q=${encodeURIComponent(question)}`);
   stream.addEventListener("start", (e) => {
     const { agent } = JSON.parse(e.data);
     if (agent === "researcher") researchRounds += 1;
@@ -424,8 +425,20 @@ try {
 renderAgents();
 
 (async () => {
-  config = await (await fetch("/api/config")).json();
-  $("#model-name").textContent = config.model;
-  const runs = await (await fetch("/api/runs")).json();
-  if (runs.length) await openRun(runs[0].slug);
+  // Free hosting puts the backend to sleep when idle; the first request can take ~1 minute.
+  $("#model-name").textContent = "Connecting…";
+  const slowHint = setTimeout(() => {
+    $("#model-name").textContent = "Waking up the server (free hosting, up to a minute)…";
+  }, 4000);
+  try {
+    config = await (await fetch(`${API}/api/config`)).json();
+    $("#model-name").textContent = config.model;
+    const runs = await (await fetch(`${API}/api/runs`)).json();
+    if (runs.length) await openRun(runs[0].slug);
+  } catch {
+    $("#model-name").textContent = "Server offline";
+    toast("Can't reach the Verdict server. Check that the backend is running.");
+  } finally {
+    clearTimeout(slowHint);
+  }
 })();

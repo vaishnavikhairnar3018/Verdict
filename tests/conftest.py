@@ -66,4 +66,5 @@ def fake_llm(monkeypatch, tmp_path):
     monkeypatch.setattr(search, "web_search", fake_web_search)
     monkeypatch.setattr(report, "REPORTS", tmp_path)
     monkeypatch.setattr(server, "REPORTS", tmp_path)
+    monkeypatch.setattr(server, "recent_runs", server.defaultdict(list))   # fresh rate limit per test
     return llm

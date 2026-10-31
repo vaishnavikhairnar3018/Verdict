@@ -68,4 +68,38 @@ def test_research_endpoint_streams_live_events(fake_llm):
 def test_dashboard_page_is_served():
     client = TestClient(server.app)
     assert "<title>Verdict</title>" in client.get("/").text
-    assert client.get("/static/logo.svg").status_code == 200
+    assert client.get("/logo.svg").status_code == 200
+    assert client.get("/config.js").status_code == 200
+
+
+def test_visitors_are_rate_limited(fake_llm, monkeypatch):
+    monkeypatch.setattr(server, "RUNS_PER_HOUR", 1)
+    monkeypatch.setattr(server, "recent_runs", server.defaultdict(list))
+    client = TestClient(server.app)
+
+    first = client.get("/api/research", params={"q": "First question?"}).text
+    second = client.get("/api/research", params={"q": "Second question?"}).text
+
+    assert "event: done" in first
+    assert "event: failed" in second and "this hour" in second
+
+
+def test_only_one_crew_runs_at_a_time(fake_llm, monkeypatch):
+    monkeypatch.setattr(server, "recent_runs", server.defaultdict(list))
+    server.crew_lock.acquire()                          # pretend another run is in progress
+    try:
+        body = TestClient(server.app).get("/api/research", params={"q": "Busy question?"}).text
+    finally:
+        server.crew_lock.release()
+    assert "event: failed" in body and "busy" in body
+
+
+def test_questions_must_be_a_sensible_length():
+    client = TestClient(server.app)
+    assert client.get("/api/research", params={"q": "?"}).status_code == 422
+    assert client.get("/api/research", params={"q": "x" * 301}).status_code == 422
+
+
+def test_browsers_on_other_sites_may_call_the_api():
+    response = TestClient(server.app).get("/api/config", headers={"Origin": "https://verdict.vercel.app"})
+    assert response.headers["access-control-allow-origin"] in ("*", "https://verdict.vercel.app")

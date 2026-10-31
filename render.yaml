@@ -1,0 +1,18 @@
+# Render "Blueprint": tells Render how to build and run the backend.
+services:
+  - type: web
+    name: verdict-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/config
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: GEMINI_API_KEY      # secret: you type it in the Render dashboard, never in code
+        sync: false
+      - key: ALLOWED_ORIGINS     # your Vercel URL, e.g. https://verdict.vercel.app
+        sync: false
+      - key: RUNS_PER_HOUR
+        value: "5"
