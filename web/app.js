@@ -378,7 +378,15 @@ function startRun(question) {
     finish();
     toast(JSON.parse(e.data).message);
   });
-  stream.onerror = () => { finish(); };
+  // The connection dropped before "done" or "failed" (network hiccup, server restart...).
+  // The crew keeps running on the server, so its result will still appear in History.
+  stream.onerror = () => {
+    finish();
+    AGENTS.forEach((a) => {
+      if (!$(`#agent-${a.id}`).classList.contains("done")) setAgent(a.id, "waiting", "Connection lost");
+    });
+    toast("Lost the live connection. The crew may still finish: check History in a minute.");
+  };
 }
 
 function toast(message) {

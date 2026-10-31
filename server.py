@@ -1,5 +1,6 @@
 import json
 import os
+import queue
 import re
 import threading
 import time
@@ -112,9 +113,46 @@ def get_report(slug: str):
     return FileResponse(REPORTS / f"{slug}.md", media_type="text/markdown", filename=f"{slug}.md")
 
 
+HEARTBEAT = 10   # seconds of silence before we send a "still working" ping
+
+
+def run_crew(question: str, updates: queue.Queue):
+    """Run the whole crew in a background thread, putting progress events on `updates`.
+
+    It always runs to the end and always releases the lock, even if the browser that asked
+    has gone away, so one dropped connection can never block the server for everyone.
+    """
+    try:
+        reset_usage()
+        state = None
+        run_start = time.time()
+        started: dict[str, float] = {}
+        timings: dict[str, float] = defaultdict(float)   # seconds per agent (all rounds)
+        # "tasks" fires when an agent starts and when it finishes; "values" is the full state.
+        for mode, chunk in build_graph().stream(initial_state(question), stream_mode=["tasks", "values"]):
+            if mode == "values":
+                state = chunk
+            elif "result" not in chunk:
+                started[chunk["name"]] = time.time()
+                updates.put(("start", {"agent": chunk["name"]}))
+            else:
+                seconds = time.time() - started.get(chunk["name"], time.time())
+                timings[chunk["name"]] += seconds
+                updates.put(("finish", {"agent": chunk["name"], "seconds": round(seconds),
+                                        "text": summarize(chunk["name"], chunk["result"] or {})}))
+        usage["timings"] = {name: round(s) for name, s in timings.items()}
+        usage["total_seconds"] = round(time.time() - run_start)
+        report = save(state, usage)
+        updates.put(("done", load(report.stem)))
+    except Exception as e:
+        updates.put(("failed", {"message": str(e)}))
+    finally:
+        crew_lock.release()
+
+
 @app.get("/api/research")
 def research(request: Request, q: str = Query(min_length=3, max_length=300)):
-    """Run the crew and stream progress to the browser as it happens."""
+    """Start the crew and stream its progress to the browser as it happens."""
     limited = over_limit(client_ip(request))
 
     def events():
@@ -122,36 +160,23 @@ def research(request: Request, q: str = Query(min_length=3, max_length=300)):
             yield sse("failed", {"message": f"You've asked {RUNS_PER_HOUR} questions this hour. "
                                             "Please try again later (this demo runs on a free API quota)."})
             return
-        # The lock is taken inside the generator, so it is only held while a run really happens.
         if not crew_lock.acquire(blocking=False):
             yield sse("failed", {"message": "The crew is busy with another question. Try again in a minute."})
             return
-        try:
-            reset_usage()
-            state = None
-            run_start = time.time()
-            started: dict[str, float] = {}
-            timings: dict[str, float] = defaultdict(float)   # seconds per agent (all rounds)
-            # "tasks" fires when an agent starts and when it finishes; "values" is the full state.
-            for mode, chunk in build_graph().stream(initial_state(q), stream_mode=["tasks", "values"]):
-                if mode == "values":
-                    state = chunk
-                elif "result" not in chunk:
-                    started[chunk["name"]] = time.time()
-                    yield sse("start", {"agent": chunk["name"]})
-                else:
-                    seconds = time.time() - started.get(chunk["name"], time.time())
-                    timings[chunk["name"]] += seconds
-                    yield sse("finish", {"agent": chunk["name"], "seconds": round(seconds),
-                                         "text": summarize(chunk["name"], chunk["result"] or {})})
-            usage["timings"] = {name: round(s) for name, s in timings.items()}
-            usage["total_seconds"] = round(time.time() - run_start)
-            report = save(state, usage)
-            yield sse("done", load(report.stem))
-        except Exception as e:
-            yield sse("failed", {"message": str(e)})
-        finally:
-            crew_lock.release()
+        updates: queue.Queue = queue.Queue()
+        # The worker thread owns the lock from here on and releases it when the run ends.
+        threading.Thread(target=run_crew, args=(q, updates), daemon=True).start()
+        while True:
+            try:
+                event, data = updates.get(timeout=HEARTBEAT)
+            except queue.Empty:
+                # An SSE comment: browsers ignore it, but it stops proxies from closing a
+                # connection that has been quiet for a while (e.g. during a slow search).
+                yield ": still working\n\n"
+                continue
+            yield sse(event, data)
+            if event in ("done", "failed"):
+                return
 
     # no-cache + X-Accel-Buffering stop hosting proxies from holding events back until the end.
     headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
