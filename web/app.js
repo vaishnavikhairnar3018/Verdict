@@ -419,8 +419,9 @@ $("#about").innerHTML = AGENTS.map((a, i) => `
     If too few claims survive, the Researcher goes back for another round.
   </div>`;
 
+// Light by default; dark only if this visitor picked it with the moon button before.
 try {
-  setTheme(localStorage.getItem("theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
+  setTheme(localStorage.getItem("theme") === "dark" ? "dark" : "light");
 } catch { setTheme("light"); }
 renderAgents();
 
