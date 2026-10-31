@@ -1,5 +1,9 @@
 # Verdict
 
+**Live demo: [verdict-crew.vercel.app](https://verdict-crew.vercel.app)**
+
+> The backend runs on a free server that sleeps when nobody's using it, so the first visit can take up to a minute to wake up.
+
 Ask a chatbot "do we only use 10% of our brain?" and you'll get a confident, well-written answer. Whether it's actually true is a different story. Language models are trained to sound right, not to be right, and from the outside you can't tell the difference.
 
 I wanted to build something that doesn't take its own word for it. Verdict is a small team of AI agents that researches a question, then tries hard to prove itself wrong, and only answers with the claims that survive.
@@ -91,7 +95,7 @@ python main.py "Does cracking your knuckles cause arthritis?"
 
 Each question takes about 6 to 10 LLM calls, so on the free tier it's worth waiting a minute between questions.
 
-The live version runs the backend on Render and the dashboard on Vercel. The steps are in [docs/DEPLOY.md](docs/DEPLOY.md).
+The [live version](https://verdict-crew.vercel.app) runs the backend on Render and the dashboard on Vercel. The steps are in [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Tests
 
